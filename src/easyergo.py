@@ -20,7 +20,7 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     for i, line in enumerate(text_doc.source.split('\n')):
         if m := re.match(r"^([A-Za-z0-9_]+)\s*=", line):
             all_kws.append((i, m[1]))
-    diagnostics = []
+            diagnostics = []
     for i, kw in all_kws:
         if kw not in known_kws:
             diagnostics.append(types.Diagnostic(
@@ -28,8 +28,8 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
                     start=types.Position(i, 0),
                     end=types.Position(i, len(kw))
                 ),
-        message="Wrong Keyword Amigo.",
-        source="EasyErgo"))
+                message="Wrong Keyword Amigo.",
+                source="EasyErgo"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
 
