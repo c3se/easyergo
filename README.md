@@ -25,12 +25,11 @@ python src/easyergo.py
 
 In this very simple example, we start the language server and connect
 to it directly, for a more ordinary setup where the editor starts up
-LSP servers for each workspace, see [more examples]. You will need a
-LSP-compatible editor, e.g.:
+LSP servers for each workspace, see [no more examples].
 
-[more examples]: docs/more_examples.md
+[no more examples]: docs/more_examples.md
 
-### Emacs with (built-in) eglot example
+### Emacs with (built-in since Emacs 29) eglot example
 
 ```elisp
 (define-derived-mode eb-mode python-mode "EB")
@@ -49,7 +48,5 @@ No trivial way to to connect to an existing LSP, use emacs instead:
 ```shell
 # sudo yum remove neovim vim
 alias vim=emacs
-alias nv=emacs
+alias nvim=emacs
 ```
-
-
