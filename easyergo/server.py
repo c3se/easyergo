@@ -34,7 +34,6 @@ def get_identifiers(tree):
         elif not cursor.goto_parent():
             break
 
-
 server = LanguageServer("easyergo-server", "dev")
 
 

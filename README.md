@@ -2,8 +2,7 @@ EasyErgo: Ergonomics for Easy Builders
 ---
 
 EasyErgo is a LSP server for writing easyconfig (.eb) files. Its aim
-is to make contributing to easyconfig *even easier*, by providing
-**NONE** of these:
+is to make contributing to easyconfig *even easier*, by providing:
 
 - highlighting and/or autocompletion of
   - easybuild keywords;
@@ -16,18 +15,17 @@ is to make contributing to easyconfig *even easier*, by providing
 
 ## Installatoin & usage
 
-EasyErgo cannot be installed for now, run a simple server instead:
+You will soon be able to install EasyErgo from PyPI, for now:
 
 ```shell
-# install pygls however you want
-python src/easyergo.py
+pip install git+https://github.com/c3se/easyergo.git
 ```
 
-In this very simple example, we start the language server and connect
-to it directly, for a more ordinary setup where the editor starts up
-LSP servers for each workspace, see [no more examples].
+Run a debug server as:
 
-[no more examples]: docs/more_examples.md
+```shell
+easyergo --debug
+```
 
 ### Emacs with (built-in since Emacs 29) eglot example
 

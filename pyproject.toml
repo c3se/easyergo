@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "EasyErgo"
+dynamic = ["version"]
+description = "LSP server for easybuilders"
+readme = "README.md"
+requires-python = ">=3.6"
+authors = [
+    { name = "Mikael Öhman", email = "mikael.ohman@chalmers.se" },
+    { name = "Yunqi Shao", email = "yunqi.shao@chalmers.se" },
+]
+dependencies = [
+   "easybuild",
+   "pygls",
+   "tree_sitter",
+   "tree_sitter_python",
+]
+classifiers = [
+   "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+   "Programming Language :: Python :: 3",
+]
+
+[project.scripts]
+easyergo = "easyergo.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/c3se/easyergo"
+
+[tool.hatch.version]
+path = "easyergo/__init__.py"
