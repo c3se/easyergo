@@ -3,10 +3,16 @@ from lsprotocol import types
 import logging
 import re
 import difflib
+import tree_sitter_python as tspython
+from tree_sitter import Language, Parser
+
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
 
+PY_LANGUAGE = Language(tspython.language(), "python")
+parser = tree_sitter.Parser()
+parser.set_language(PY_LANGAUGE)
 
 server = LanguageServer("easyergo-server", "dev")
 
@@ -24,9 +30,10 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     logging.debug(f'easyblock: {easyblock_name}, name: {name}')
     app_class = get_easyblock_class(easyblock_name, name=name)
     eb_kw = app_class.extra_options()
-    all_known_parameters = ''
+    all_known_parameters = set(eb_kw) | set(default_parameters)
     
     diagnostics = []
+    # TODO: replace with parser
     all_kws = []
     for i, line in enumerate(text_doc.source.split('\n')):
         if line.startswith('local_') or line.startswith('_'):
@@ -36,13 +43,12 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             all_kws.append((i, m[1]))
     for i, kw in all_kws:
         if kw not in default_parameters and kw not in eb_kw:
-            difflib.get_close_matches()
             diagnostics.append(types.Diagnostic(
                 range=types.Range(
                     start=types.Position(i, 0),
                     end=types.Position(i, len(kw))
                 ),
-                message="Wrong Keyword Amigo.",
+                message="Did you mean: " + ",".join(difflib.get_close_matches(kw, all_known_parameters)),
                 source="EasyErgo"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
