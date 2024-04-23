@@ -5,11 +5,13 @@ import logging
 import re
 import difflib
 import tree_sitter_python as tspython
+from glob import glob
 from tree_sitter import Language, Parser
 
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
-from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
+from easybuild.framework.easyconfig.easyconfig import get_easyblock_class, get_toolchain_hierarchy
+from easybuild.tools.toolchain.utilities import search_toolchain
 import easybuild.framework.easyconfig
 
 builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(builtins, attr)))
@@ -20,6 +22,11 @@ all_constants = easybuild.framework.easyconfig.constants.__all__ + \
 PY_LANGUAGE = Language(tspython.language(), "python")
 parser = Parser()
 parser.set_language(PY_LANGUAGE)
+
+_, all_tc_classes = search_toolchain('')
+subtoolchains = {tc_class.NAME: getattr(tc_class, 'SUBTOOLCHAIN', None) for tc_class in all_tc_classes}
+
+robot_paths = ['/apps/easybuild-easyconfigs/easybuild/easyconfigs/']
 
 def get_identifiers(tree):
     cursor = tree.walk()
@@ -50,6 +57,26 @@ def get_dependencies(tree):
                         continue # Don't know what to do with this assignment
                     dep_nodes.append(expr.children[2])  # child 2 is RHS
     return dep_nodes
+
+
+def find_deps(name, versionsuffix, tcs):
+    name_exists = True
+    matches = []
+    for robot_path in robot_paths:
+        for tc in tcs:
+            if tc['name'] == 'system':
+                matches += glob(f'{robot_path}/{name[0].lower()}/{name}/{name}-*{versionsuffix}.eb')
+                matches += glob(f'{robot_path}/{name}-*{versionsuffix}.eb')
+            else:
+                tcname = tc['name'] + '-' + tc['version']
+                print(f'{robot_path}/{name[0].lower()}/{name}/{name}-*-{tcname}{versionsuffix}.eb')
+                matches += glob(f'{robot_path}/{name[0].lower()}/{name}/{name}-*-{tcname}{versionsuffix}.eb')
+                matches += glob(f'{robot_path}/{name}-*-{tcname}{versionsuffix}.eb')
+    if not matches:  # Check if name exists at all
+        name_exists = bool(glob(f'{robot_path}/{name[0].lower()}/{name}/')) or bool(glob(f'{robot_path}/{name}-*.eb'))
+
+    matches = [match.split('/')[-1] for match in matches]
+    return matches, name_exists
 
 
 def make_diagnostic(node, message):
@@ -85,9 +112,16 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
 
     # Detect toolchain
     toolchain = fetch_parameters_from_easyconfig(text_doc.source, ['toolchain'])[0]
-    print(toolchain)
-    
+    # TODO:
+    default_tcs = [{'name': 'foss', 'version': '2023a'},
+                   {'name': 'gfbf', 'version': '2023a'},
+                   {'name': 'gompi', 'version': '2023a'},
+                   {'name': 'GCC', 'version': '12.3.0'},
+                   {'name': 'GCCcore', 'version': '12.3.0'}]
 
+    diagnostics = []
+
+    # Check options and constants
     nodes = []
     tree = parser.parse(bytes(text_doc.source, 'utf8'))
     for node in get_identifiers(tree):
@@ -96,7 +130,6 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             continue
         nodes.append(node)
 
-    diagnostics = []
     for node in nodes:
         kw = node.text.decode('utf8')
         if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
@@ -104,20 +137,43 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             message = "Did you mean: " + ",".join(matches) if matches else "Unknown variable"
             diagnostics.append(make_diagnostic(node, message))
 
+    # Check dependency names and versions
     dep_nodes = get_dependencies(tree)
     for dep_node in dep_nodes:
         for node in dep_node.children:
             if node.type == 'tuple':
                 values = node.children[1:-1:2]
-                if len(values) == 2: # Just name and version
-                    # diagnostics.append(make_diagnostic(node, "test"))
-                    pass # TODO
-                elif len(values) == 3: # name, version, versionsuffix
-                    pass # TODO
-                elif len(values) == 4: # name, version, versionsuffix, toolchain
-                    pass # TODO
-                else: # please make it stop
+                if len(values) < 2:
                     diagnostics.append(make_diagnostic(node, "Must have 2-4 elements exactly"))
+                    continue
+            
+                if values[0].type != 'string' or values[1].type != 'string':
+                    continue  # ignoring parameterized entries
+
+                print(values[0].text, values[1].type)
+                name, version = eval(values[0].text), eval(values[1].text)
+                versionsuffix, tcs = '', default_tcs
+                if len(values) >= 3:
+                    versionsuffix = eval(values[2].text)
+
+                if any('%' in x for x in (name, version, versionsuffix)):
+                    continue  # can't deal with templates
+
+                if len(values) >= 4:
+                    if values[3].text == b'SYSTEM':
+                        tcs = [{'name': 'system', 'version': 'system'}]
+                    else:
+                        continue  # tcs = [eval(values[3].text)]  # Just giving up for now
+
+                matches, name_exists = find_deps(name, versionsuffix, tcs)
+                if matches:
+                    if not any(version in match for match in matches):
+                        diagnostics.append(make_diagnostic(values[1], 'Try ' + ','.join(matches)))
+                else:
+                    if name_exists:
+                        diagnostics.append(make_diagnostic(values[1], 'No compatible version exist'))
+                    else:
+                        diagnostics.append(make_diagnostic(values[0], 'Name not recognized'))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
 
