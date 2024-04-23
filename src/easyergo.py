@@ -1,5 +1,6 @@
 from pygls.server import LanguageServer
 from lsprotocol import types
+import builtins
 import logging
 import re
 import difflib
@@ -10,6 +11,8 @@ from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_par
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
 import easybuild.framework.easyconfig
+
+builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(builtins, attr)))
 
 all_constants = easybuild.framework.easyconfig.constants.__all__ + \
                 [x[0] for x in easybuild.framework.easyconfig.templates.TEMPLATE_CONSTANTS]
@@ -48,15 +51,19 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     # ecdict = ec.get_config_dict()
     # name = ec['ec']['name']
     easyblock_name, name = fetch_parameters_from_easyconfig(text_doc.source, ['easyblock', 'name'])
-    logging.debug(f'easyblock: {easyblock_name}, name: {name}')
-    app_class = get_easyblock_class(easyblock_name, name=name)
-    eb_kw = app_class.extra_options()
+    logging.info(f'easyblock: {easyblock_name}, name: {name}')
+    try:
+        app_class = get_easyblock_class(easyblock_name, name=name)
+        eb_kw = app_class.extra_options()
+    except:
+        eb_kw = []
     all_known_ids = set(eb_kw) | set(default_parameters) | set(all_constants)
     
     nodes = []
     tree = parser.parse(bytes(text_doc.source, 'utf8'))
     for node in get_identifiers(tree):
-        if node.text.startswith(b'local_') or node.text.startswith(b'_'):
+        ident = node.text.decode('utf8')
+        if ident.startswith('local_') or ident.startswith('_') or ident in builtin_functions :
             continue
         nodes.append(node)
 
