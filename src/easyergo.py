@@ -37,9 +37,33 @@ def get_identifiers(tree):
         elif not cursor.goto_parent():
             break
 
+def get_dependencies(tree):
+    # Not very robust, assumes the simple case which is the case in 99% of easyconfigs
+    dep_nodes = []
+    for child in tree.root_node.children:
+        if child.type == 'expression_statement':
+            expr = child.children[0]
+            if expr.type == 'assignment':
+                var = expr.children[0].text
+                if var == b'dependencies' or var == b'builddependencies':
+                    if len(expr.children) != 3 or expr.children[2].type != 'list':
+                        continue # Don't know what to do with this assignment
+                    dep_nodes.append(expr.children[2])  # child 2 is RHS
+    return dep_nodes
+
+
+def make_diagnostic(node, message):
+    # Wrap tree sitter node with a custom message
+    return types.Diagnostic(
+        range=types.Range(
+            start=types.Position(*node.range.start_point),
+            end=types.Position(*node.range.end_point)
+        ),
+        message=message,
+        source="EasyErgo")
+
 
 server = LanguageServer("easyergo-server", "dev")
-
 
 @server.feature(types.TEXT_DOCUMENT_DID_SAVE)
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
@@ -58,7 +82,12 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     except:
         eb_kw = []
     all_known_ids = set(eb_kw) | set(default_parameters) | set(all_constants)
+
+    # Detect toolchain
+    toolchain = fetch_parameters_from_easyconfig(text_doc.source, ['toolchain'])[0]
+    print(toolchain)
     
+
     nodes = []
     tree = parser.parse(bytes(text_doc.source, 'utf8'))
     for node in get_identifiers(tree):
@@ -71,13 +100,24 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     for node in nodes:
         kw = node.text.decode('utf8')
         if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
-            diagnostics.append(types.Diagnostic(
-                range=types.Range(
-                    start=types.Position(*node.range.start_point),
-                    end=types.Position(*node.range.end_point)
-                ),
-                message="Did you mean: " + ",".join(difflib.get_close_matches(kw, all_known_ids)),
-                source="EasyErgo"))
+            matches = difflib.get_close_matches(kw, all_known_ids)
+            message = "Did you mean: " + ",".join(matches) if matches else "Unknown variable"
+            diagnostics.append(make_diagnostic(node, message))
+
+    dep_nodes = get_dependencies(tree)
+    for dep_node in dep_nodes:
+        for node in dep_node.children:
+            if node.type == 'tuple':
+                values = node.children[1:-1:2]
+                if len(values) == 2: # Just name and version
+                    # diagnostics.append(make_diagnostic(node, "test"))
+                    pass # TODO
+                elif len(values) == 3: # name, version, versionsuffix
+                    pass # TODO
+                elif len(values) == 4: # name, version, versionsuffix, toolchain
+                    pass # TODO
+                else: # please make it stop
+                    diagnostics.append(make_diagnostic(node, "Must have 2-4 elements exactly"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
 
