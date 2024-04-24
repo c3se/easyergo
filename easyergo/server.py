@@ -194,20 +194,20 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     # correct_filename = f'{name}-{version}-{toolchainname}-{toolchainversion}{versionsuffix}.eb'
     if 'name' in ecdict and not filename.startswith(f'{ecdict["name"]}-'):
         # todo: Find node
-        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
     if 'version' in ecdict and not f'-{ecdict["version"]}-' in filename:
         # todo: Find node
-        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
     if 'toolchain' in ecdict and 'name' in toolchain and 'version' in toolchain and \
            toolchain["name"] != 'system' and \
            not f'-{toolchain["version"]}-{toolchain["version"]}' in filename:
         # todo: Find node
-        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
     if 'versionsuffix' in ecdict:
         # TODO needs expanded template
         # not filename.endswith(f'{ecdict["versionsuffix"]}.eb'):
         if False:
             # todo: Find node
-            diagnostics.append(make_diagnostic(node, "Does not match filename"))
+            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
