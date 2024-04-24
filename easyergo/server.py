@@ -1,11 +1,12 @@
-from pygls.server import LanguageServer
-from lsprotocol import types
 import builtins
+import difflib
 import logging
 import re
-import difflib
-import tree_sitter_python as tspython
 from glob import glob
+
+from pygls.server import LanguageServer
+from lsprotocol import types
+import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
@@ -90,6 +91,7 @@ def make_diagnostic(node, message):
 def find_assignment(tree, name):
     pass
 
+
 def extract(tree, names):
     # TODO search for names as assigned identifiers
     return {}
@@ -129,7 +131,7 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
                        {'name': 'GCC', 'version': '12.3.0'},
                        {'name': 'GCCcore', 'version': '12.3.0'}]
     else:
-        default_tcs = None
+        default_tcs = None, None
 
     all_known_ids = set(eb_kw) | set(default_parameters) | set(all_constants)
 
@@ -178,23 +180,34 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
         matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
         if matches:
             if not any(version in match for match in matches):
-                diagnostics.append(make_diagnostic(values[1], 'Try ' + ','.join(matches)))
+                diagnostics.append(make_diagnostic(version_node, 'Try ' + ','.join(matches)))
         else:
             if name_exists:
-                diagnostics.append(make_diagnostic(values[1], 'No compatible version exist'))
+                diagnostics.append(make_diagnostic(version_node, 'No compatible version exist'))
             else:
                 matches = get_close_matches_icase(name, name_suggestions)
                 message = "Did you mean " + ",".join(matches) if matches else "Name not recognized"
-                diagnostics.append(make_diagnostic(values[0], message))
+                diagnostics.append(make_diagnostic(name_node, message))
 
     # Check filename matching name, version, toolchain, versionsuffix
     filename = params.text_document.uri.split('/')[-1]
-    for node in []:  # todo
-        if node.text == b'name':
-            pass #diagnostics.append(make_diagnostic(node, "Does not match filename"))
-        elif node.text == b'version':
-            pass #diagnostics.append(make_diagnostic(node, "Does not match filename"))
-        elif node.text == b'toolchain':
-            pass #diagnostics.append(make_diagnostic(node, "Does not match filename"))
+    # correct_filename = f'{name}-{version}-{toolchainname}-{toolchainversion}{versionsuffix}.eb'
+    if 'name' in ecdict and not filename.startswith(f'{ecdict["name"]}-'):
+        # todo: Find node
+        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+    if 'version' in ecdict and not f'-{ecdict["version"]}-' in filename:
+        # todo: Find node
+        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+    if 'toolchain' in ecdict and 'name' in toolchain and 'version' in toolchain and \
+           toolchain["name"] != 'system' and \
+           not f'-{toolchain["version"]}-{toolchain["version"]}' in filename:
+        # todo: Find node
+        diagnostics.append(make_diagnostic(node, "Does not match filename"))
+    if 'versionsuffix' in ecdict:
+        # TODO needs expanded template
+        # not filename.endswith(f'{ecdict["versionsuffix"]}.eb'):
+        if False:
+            # todo: Find node
+            diagnostics.append(make_diagnostic(node, "Does not match filename"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
