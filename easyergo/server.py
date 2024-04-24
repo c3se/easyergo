@@ -37,36 +37,21 @@ def get_close_matches_icase(word, possibilities, *args, **kwargs):
     return [lpos[m] for m in lmatches]
 
 
-def get_identifiers(tree):
-    cursor = tree.walk()
-    # TODO: skip going into nodes that are of type "attribute"
+# Matches global keywards (TODO: also exclude single-char symbols)
+query_global_kws = PY_LANGUAGE.query("""
+((identifier) @kw (#not-match? @kw "^(local)?_.+"))
+""")
 
-    visited_children = False
-    while True:
-        if not visited_children:
-            if cursor.node.type == 'identifier':
-                yield cursor.node
-            if not cursor.goto_first_child():
-                visited_children = True
-        elif cursor.goto_next_sibling():
-            visited_children = False
-        elif not cursor.goto_parent():
-            break
-
-
-def get_dependencies(tree):
-    # Not very robust, assumes the simple case which is the case in 99% of easyconfigs
-    dep_nodes = []
-    for child in tree.root_node.children:
-        if child.type == 'expression_statement':
-            expr = child.children[0]
-            if expr.type == 'assignment':
-                var = expr.children[0].text
-                if var == b'dependencies' or var == b'builddependencies':
-                    if len(expr.children) != 3 or expr.children[2].type != 'list':
-                        continue # Don't know what to do with this assignment
-                    dep_nodes.append(expr.children[2])  # child 2 is RHS
-    return dep_nodes
+# Matches dependency definitions
+query_dep_spec = PY_LANGUAGE.query("""
+(assignment
+  left: (identifier)  @kw (#match? @kw "^(build)?dependencies$")
+  right: (list (tuple .(_) @dep.name
+                      .((_) @dep.version
+                       .((_) @dep.versionsuffix
+                        .((_) @dep.toolchain
+                         .(_)* @dep.extra)?)?)? ) @dep.spec))
+""") # get named keys for dep.spec matches, we always want them in order
 
 
 def find_deps(name, versionsuffix, tcs):
@@ -101,6 +86,9 @@ def make_diagnostic(node, message):
         message=message,
         source="EasyErgo")
 
+
+def find_assignment(tree, name):
+    pass
 
 def extract(tree, names):
     # TODO search for names as assigned identifiers
@@ -148,14 +136,7 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     diagnostics = []
 
     # Check options and constants
-    nodes = []
-    for node in get_identifiers(tree):
-        ident = node.text.decode('utf8')
-        if ident.startswith('local_') or ident.startswith('_') or ident in builtin_functions :
-            continue
-        nodes.append(node)
-
-    for node in nodes:
+    for node, _ in query_global_kws.captures(tree.root_node):
         kw = node.text.decode('utf8')
         if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
             matches = get_close_matches_icase(kw, all_known_ids)
@@ -163,47 +144,52 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             diagnostics.append(make_diagnostic(node, message))
 
     # Check dependency names and versions
-    dep_nodes = get_dependencies(tree)
-    for dep_node in dep_nodes:
-        for node in dep_node.children:
-            if node.type == 'tuple':
-                values = node.children[1:-1:2]
-                if len(values) < 2:
-                    diagnostics.append(make_diagnostic(node, "Must have 2-4 elements exactly"))
-                    continue
-            
-                if values[0].type != 'string' or values[1].type != 'string':
-                    continue  # ignoring parameterized entries
+    for _, m in query_dep_spec.matches(tree.root_node):
+        # Check at least that the tuple size makes sense
+        if 'dep.spec' not in m: continue
+        if 'dep.version' not in m or 'dep.extra' in m:
+            diagnostics.append(make_diagnostic(m['dep.spec'], "Must have 2-4 elements exactly"))
+            continue
 
-                name, version = eval(values[0].text), eval(values[1].text)
-                versionsuffix, tcs = '', default_tcs
-                if len(values) >= 3:
-                    versionsuffix = eval(values[2].text)
+        # fetch name, version, versionsuffix if they are all string, otherwise abort
+        name_node, version_node = m['dep.name'], m['dep.version']
+        if name_node.type != 'string' or version_node.type != 'string':
+            continue
+        name, version = eval(name_node.text), eval(version_node.text)
+        
+        # versionsuffix falls back to empty string, if not specified
+        if 'dep.versionsuffix' in m:
+            versionsuffix_node = m['dep.versionsuffix']
+            if versionsuffix_node.type != 'string':
+                continue
+            else:
+                versionsuffix = eval(versionsuffix_node.text)
+        else:
+            versionsuffix = ""
 
-                if any('%' in x for x in (name, version, versionsuffix)):
-                    continue  # can't deal with templates
+        if 'dep.toolchain' in m:
+            if m['dep.toolchain'].text == b'SYSTEM':
+                tcs = [{'name': 'system', 'version': 'system'}]
+            else:
+                continue  # give up on more complex toolchain spec here
+        else:
+            tcs = default_tcs
 
-                if len(values) >= 4:
-                    if values[3].text == b'SYSTEM':
-                        tcs = [{'name': 'system', 'version': 'system'}]
-                    else:
-                        continue  # tcs = [eval(values[3].text)]  # Just giving up for now
-
-                matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
-                if matches:
-                    if not any(version in match for match in matches):
-                        diagnostics.append(make_diagnostic(values[1], 'Try ' + ','.join(matches)))
-                else:
-                    if name_exists:
-                        diagnostics.append(make_diagnostic(values[1], 'No compatible version exist'))
-                    else:
-                        matches = get_close_matches_icase(name, name_suggestions)
-                        message = "Did you mean " + ",".join(matches) if matches else "Name not recognized"
-                        diagnostics.append(make_diagnostic(values[0], message))
+        matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
+        if matches:
+            if not any(version in match for match in matches):
+                diagnostics.append(make_diagnostic(values[1], 'Try ' + ','.join(matches)))
+        else:
+            if name_exists:
+                diagnostics.append(make_diagnostic(values[1], 'No compatible version exist'))
+            else:
+                matches = get_close_matches_icase(name, name_suggestions)
+                message = "Did you mean " + ",".join(matches) if matches else "Name not recognized"
+                diagnostics.append(make_diagnostic(values[0], message))
 
     # Check filename matching name, version, toolchain, versionsuffix
     filename = params.text_document.uri.split('/')[-1]
-    for node in nodes:
+    for node in []:  # todo
         if node.text == b'name':
             pass #diagnostics.append(make_diagnostic(node, "Does not match filename"))
         elif node.text == b'version':
@@ -212,4 +198,3 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             pass #diagnostics.append(make_diagnostic(node, "Does not match filename"))
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
-
