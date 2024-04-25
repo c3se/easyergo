@@ -89,7 +89,7 @@ def make_diagnostic(node, message):
 
 
 def find_assignment(tree, name):
-    pass
+    return None # TODO: find assignment of variable named name
 
 
 def extract(tree, names):
@@ -97,47 +97,9 @@ def extract(tree, names):
     return {}
 
 
-server = LanguageServer("easyergo-server", "dev")
-
-@server.feature(types.TEXT_DOCUMENT_DID_SAVE)
-@server.feature(types.TEXT_DOCUMENT_DID_OPEN)
-async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
-    """Checks keywords agains know eb keywords"""
-    
-    # Extract as much information as possible:
-    text_doc = ls.workspace.get_text_document(params.text_document.uri)
-    tree = parser.parse(bytes(text_doc.source, 'utf8'))
-    try:
-        ec = EasyConfigParser(rawcontent=text_doc.source)
-        ecdict = ec.get_config_dict(validate=False)
-    except:
-        ecdict = extract(tree, ['easyblock', 'name', 'version', 'toolchain'])
-
-    logging.info(f'found: {ecdict}')
-       
-    try:
-        easyblock, name = ecdict['easyblock'], ecdict['name']
-        app_class = get_easyblock_class(easyblock, name=name)
-        eb_kw = app_class.extra_options()
-    except:
-        eb_kw = []
-
-    # Detect toolchain
-    if 'toolchain' in ecdict:
-        # TODO:
-        default_tcs = [{'name': 'foss', 'version': '2023a'},
-                       {'name': 'gfbf', 'version': '2023a'},
-                       {'name': 'gompi', 'version': '2023a'},
-                       {'name': 'GCC', 'version': '12.3.0'},
-                       {'name': 'GCCcore', 'version': '12.3.0'}]
-    else:
-        default_tcs = None, None
-
+def check_variables(ls, uri, tree, eb_kw):
     all_known_ids = set(eb_kw) | set(default_parameters) | set(all_constants)
-
     diagnostics = []
-
-    # Check options and constants
     for node, _ in query_global_kws.captures(tree.root_node):
         kw = node.text.decode('utf8')
         if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
@@ -145,7 +107,11 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
             message = "Did you mean: " + ",".join(matches) if matches else "Unknown variable"
             diagnostics.append(make_diagnostic(node, message))
 
-    # Check dependency names and versions
+    ls.publish_diagnostics(uri, diagnostics)
+
+
+def check_dependencies(ls, uri, tree, ecdict, default_tcs):
+    diagnostics = []
     for _, m in query_dep_spec.matches(tree.root_node):
         # Check at least that the tuple size makes sense
         if 'dep.spec' not in m: continue
@@ -189,25 +155,87 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
                 message = "Did you mean " + ",".join(matches) if matches else "Name not recognized"
                 diagnostics.append(make_diagnostic(name_node, message))
 
+    ls.publish_diagnostics(uri, diagnostics)
+
+
+def check_filename(ls, uri, tree, ecdict):
+    diagnostics = []
     # Check filename matching name, version, toolchain, versionsuffix
-    filename = params.text_document.uri.split('/')[-1]
+    filename = uri.split('/')[-1]
     # correct_filename = f'{name}-{version}-{toolchainname}-{toolchainversion}{versionsuffix}.eb'
     if 'name' in ecdict and not filename.startswith(f'{ecdict["name"]}-'):
-        # todo: Find node
-        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+        node = find_assignment(tree, 'name')
+        if node:
+            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+        else:
+            logging.warning("Couldn't locate name location in source")
     if 'version' in ecdict and not f'-{ecdict["version"]}-' in filename:
-        # todo: Find node
-        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
-    if 'toolchain' in ecdict and 'name' in toolchain and 'version' in toolchain and \
-           toolchain["name"] != 'system' and \
-           not f'-{toolchain["version"]}-{toolchain["version"]}' in filename:
-        # todo: Find node
-        diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+        node = find_assignment(tree, 'version')
+        if node:
+            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+        else:
+            logging.warning("Couldn't locate version location in source")
+    if 'toolchain' in ecdict and 'name':
+        toolchain = ecdict["toolchain"]
+        if 'name' in toolchain and 'version' in toolchain and \
+               toolchain["name"] != 'system' and \
+           not f'-{toolchain["name"]}-{toolchain["version"]}' in filename:
+            logging.warning(f'-{toolchain["name"]}-{toolchain["version"]}')
+            node = find_assignment(tree, 'toolchain')
+            if node:
+                diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+            else:
+                logging.warning("Couldn't locate toolchain location in source")
     if 'versionsuffix' in ecdict:
         # TODO needs expanded template
         # not filename.endswith(f'{ecdict["versionsuffix"]}.eb'):
         if False:
-            # todo: Find node
-            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+            node = find_assignment(tree, 'versionsuffix')
+            if node:
+                diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+            else:
+                logging.warning("Couldn't locate versionsuffix location in source")
 
-    ls.publish_diagnostics(text_doc.uri, diagnostics)
+    ls.publish_diagnostics(uri, diagnostics)
+
+
+server = LanguageServer("easyergo-server", "dev")
+
+@server.feature(types.TEXT_DOCUMENT_DID_SAVE)
+@server.feature(types.TEXT_DOCUMENT_DID_OPEN)
+async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
+    """Checks keywords agains know eb keywords"""
+    
+    # Extract as much information as possible:
+    text_doc = ls.workspace.get_text_document(params.text_document.uri)
+    tree = parser.parse(bytes(text_doc.source, 'utf8'))
+    try:
+        ec = EasyConfigParser(rawcontent=text_doc.source)
+        ecdict = ec.get_config_dict(validate=False)
+    except:
+        ecdict = extract(tree, ['easyblock', 'name', 'version', 'toolchain'])
+
+    logging.warning(f'found: {ecdict}')
+       
+    try:
+        easyblock, name = ecdict['easyblock'], ecdict['name']
+        app_class = get_easyblock_class(easyblock, name=name)
+        eb_kw = app_class.extra_options()
+    except:
+        eb_kw = []
+
+    # Detect toolchain
+    if 'toolchain' in ecdict:
+        # TODO:
+        default_tcs = [{'name': 'foss', 'version': '2023a'},
+                       {'name': 'gfbf', 'version': '2023a'},
+                       {'name': 'gompi', 'version': '2023a'},
+                       {'name': 'GCC', 'version': '12.3.0'},
+                       {'name': 'GCCcore', 'version': '12.3.0'}]
+    else:
+        default_tcs = None, None
+
+    check_variables(ls, text_doc.uri, tree, eb_kw)
+    check_dependencies(ls, text_doc.uri, tree, ecdict, default_tcs)
+    check_filename(ls, text_doc.uri, tree, ecdict)
+
