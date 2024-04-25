@@ -6,8 +6,6 @@ from glob import glob
 
 from pygls.server import LanguageServer
 from lsprotocol import types
-import tree_sitter_python as tspython
-from tree_sitter import Language, Parser
 
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
@@ -17,11 +15,10 @@ from easybuild.tools.options import EasyBuildOptions
 from easybuild.tools.toolchain.utilities import search_toolchain
 from easybuild.framework.easyconfig import constants as eb_constants
 
+from easyergo.tsparser import EasyConfigTree
+
 builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(builtins, attr)))
 
-PY_LANGUAGE = Language(tspython.language(), "python")
-parser = Parser()
-parser.set_language(PY_LANGUAGE)
 
 # Fixed initializations of easybuild
 eb_go = EasyBuildOptions(go_args=[])
@@ -87,23 +84,6 @@ def get_close_matches_icase(word, possibilities, *args, **kwargs):
     return [lpos[m] for m in lmatches]
 
 
-# Matches global keywards (TODO: also exclude single-char symbols)
-query_global_kws = PY_LANGUAGE.query("""
-((identifier) @kw (#not-match? @kw "^(local)?_.+"))
-""")
-
-# Matches dependency definitions
-query_dep_spec = PY_LANGUAGE.query("""
-(assignment
-  left: (identifier)  @kw (#match? @kw "^(build)?dependencies$")
-  right: (list (tuple .(_) @dep.name
-                      .((_) @dep.version
-                       .((_) @dep.versionsuffix
-                        .((_) @dep.toolchain
-                         .(_)* @dep.extra)?)?)? ) @dep.spec))
-""") # get named keys for dep.spec matches, we always want them in order
-
-
 def find_deps(name, versionsuffix, tcs):
     name_exists = True
     name_suggestions = []
@@ -137,19 +117,10 @@ def make_diagnostic(node, message):
         source="EasyErgo")
 
 
-def find_assignment(tree, name):
-    return None # TODO: find assignment of variable named name
-
-
-def extract(tree, names):
-    # TODO search for names as assigned identifiers
-    return {}
-
-
-def check_variables(tree, eb_kw):
+def check_variables(ectree, eb_kw):
     all_known_ids = set(eb_kw) | set(default_parameters) | all_constants
     diagnostics = []
-    for node, _ in query_global_kws.captures(tree.root_node):
+    for node in ectree.nonlocal_var_nodes:
         kw = node.text.decode('utf8')
         if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
             matches = get_close_matches_icase(kw, all_known_ids)
@@ -159,38 +130,17 @@ def check_variables(tree, eb_kw):
     return diagnostics
 
 
-def check_dependencies(tree, ecdict, default_tcs):
+def check_dependencies(ectree, default_tcs):
     diagnostics = []
-    for _, m in query_dep_spec.matches(tree.root_node):
-        # Check at least that the tuple size makes sense
-        if 'dep.spec' not in m: continue
-        if 'dep.version' not in m or 'dep.extra' in m:
-            diagnostics.append(make_diagnostic(m['dep.spec'], "Must have 2-4 elements exactly"))
+    for (node, children), value in zip(ectree.dep_nodes, ectree.dep_vals):
+        if len(value)<2 or len(value)>4:
+            diagnostics.append(make_diagnostic(node, "Must have 2-4 elements exactly"))
             continue
 
-        # fetch name, version, versionsuffix if they are all string, otherwise abort
-        name_node, version_node = m['dep.name'], m['dep.version']
-        if name_node.type != 'string' or version_node.type != 'string':
-            continue
-        name, version = eval(name_node.text), eval(version_node.text)
-        
-        # versionsuffix falls back to empty string, if not specified
-        if 'dep.versionsuffix' in m:
-            versionsuffix_node = m['dep.versionsuffix']
-            if versionsuffix_node.type != 'string':
-                continue
-            else:
-                versionsuffix = eval(versionsuffix_node.text)
-        else:
-            versionsuffix = ""
-
-        if 'dep.toolchain' in m:
-            if m['dep.toolchain'].text == b'SYSTEM':
-                tcs = [{'name': 'system', 'version': 'system'}]
-            else:
-                continue  # give up on more complex toolchain spec here
-        else:
-            tcs = default_tcs
+        name, version = value[:2]
+        name_node, version_node = children[:2]
+        versionsuffix = value[2] if len(value) > 2 else ""
+        tcs =  value[3] if len(value) > 3 else default_tcs
 
         matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
         if matches:
@@ -207,21 +157,23 @@ def check_dependencies(tree, ecdict, default_tcs):
     return diagnostics
 
 
-def check_filename(uri, tree, ecdict):
-    diagnostics = []
+def check_filename(uri, ectree):
     # Check filename matching name, version, toolchain, versionsuffix
-    filename = uri.split('/')[-1]
     # correct_filename = f'{name}-{version}-{toolchainname}-{toolchainversion}{versionsuffix}.eb'
+
+    diagnostics = []
+    filename = uri.split('/')[-1]
+    ecdict = ectree.ecdict
     if 'name' in ecdict and not filename.startswith(f'{ecdict["name"]}-'):
-        node = find_assignment(tree, 'name')
-        if node:
-            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+        nodes = ectree.var_assign_map.get('name', None)
+        if nodes:
+            diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
         else:
             logging.warning("Couldn't locate name location in source")
-    if 'version' in ecdict and not f'-{ecdict["version"]}-' in filename:
-        node = find_assignment(tree, 'version')
-        if node:
-            diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+    if 'version' in ecdict and not f'-{ecdict["version"]}' in filename:
+        nodes = ectree.var_assign_map.get('version', None)
+        if nodes:
+            diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
         else:
             logging.warning("Couldn't locate version location in source")
     if 'toolchain' in ecdict and 'name':
@@ -229,18 +181,18 @@ def check_filename(uri, tree, ecdict):
         if 'name' in toolchain and 'version' in toolchain and \
                toolchain["name"] != 'system' and \
            not f'-{toolchain["name"]}-{toolchain["version"]}' in filename:
-            node = find_assignment(tree, 'toolchain')
+            nodes = ectree.var_assign_map.get('toolchain', None)
             if node:
-                diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+                diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
             else:
                 logging.warning("Couldn't locate toolchain location in source")
     if 'versionsuffix' in ecdict:
         # TODO needs expanded template
         # not filename.endswith(f'{ecdict["versionsuffix"]}.eb'):
         if False:
-            node = find_assignment(tree, 'versionsuffix')
+            nodes = ectree.var_assign_map.get('versionsuffix', None)
             if node:
-                diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
+                diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
             else:
                 logging.warning("Couldn't locate versionsuffix location in source")
 
@@ -253,34 +205,33 @@ server = LanguageServer("easyergo-server", "dev")
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
 async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     """Checks keywords agains know eb keywords"""
-    
+
     # Extract as much information as possible:
     text_doc = ls.workspace.get_text_document(params.text_document.uri)
-    tree = parser.parse(bytes(text_doc.source, 'utf8'))
     try:
         ec = EasyConfigParser(rawcontent=text_doc.source)
-        ecdict = ec.get_config_dict(validate=False)
+        hints = ec.get_config_dict(validate=False)
     except:
-        ecdict = extract(tree, ['easyblock', 'name', 'version', 'toolchain'])
+        hints = {}
+    ectree = EasyConfigTree(bytes(text_doc.source, 'utf-8'), hints)
+    logging.warning(f'found: {ectree.ecdict}')
 
-    logging.warning(f'found: {ecdict}')
-       
     try:
-        easyblock, name = ecdict['easyblock'], ecdict['name']
+        easyblock, name = ectree.ecdict['easyblock'], ectree.ecdict['name']
         app_class = get_easyblock_class(easyblock, name=name)
         eb_kw = app_class.extra_options()
     except:
         eb_kw = []
 
-    if 'toolchain' in ecdict:
-        default_tcs = get_toolchain_hierarchy(ecdict['toolchain'])
+    if 'toolchain' in ectree.ecdict:
+        default_tcs = get_toolchain_hierarchy(ectree.ecdict['toolchain'])
     else:
         default_tcs = []
-
     logging.warning(f"Assuming toolchains: {default_tcs}")
+
     diagnostics = []
-    diagnostics += check_variables(tree, eb_kw)
-    diagnostics += check_dependencies(tree, ecdict, default_tcs)
-    diagnostics += check_filename(text_doc.uri, tree, ecdict)
+    diagnostics += check_variables(ectree, eb_kw)
+    diagnostics += check_dependencies(ectree, default_tcs)
+    diagnostics += check_filename(text_doc.uri, ectree)
 
     ls.publish_diagnostics(text_doc.uri, diagnostics)
