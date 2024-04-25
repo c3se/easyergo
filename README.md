@@ -39,12 +39,18 @@ easyergo --debug
    `(eb-mode . ("localhost" 8000))))
 ```
 
-### neovim/vim example
+### neovim example
 
-No trivial way to to connect to an existing LSP, use emacs instead:
+No trivial way to to connect to an existing LSP with `.config/nvim/init.lua`:
 
 ```shell
-# sudo yum remove neovim vim
-alias vim=emacs
-alias nvim=emacs
+vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
+  pattern = {"*.eb"},
+  callback = function(args)
+    client_id = vim.lsp.start({
+      name = 'easyergo',
+      cmd = vim.lsp.rpc.connect('127.0.0.1', 8000)
+  })
+  end
+})
 ```
