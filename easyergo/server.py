@@ -10,7 +10,7 @@ import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
-from easybuild.framework.easyconfig.easyconfig import get_easyblock_class, get_toolchain_hierarchy
+from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
 from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
 from easybuild.tools.options import EasyBuildOptions
@@ -31,7 +31,53 @@ logging.debug("Using robot paths: %s", robot_paths)
 all_constants = set(eb_constants.__all__ + [x[0] for x in TEMPLATE_CONSTANTS])
 
 _, all_tc_classes = search_toolchain('')
+is_composite = {tc_class.NAME: len(tc_class.__bases__) > 1 for tc_class in all_tc_classes}
 subtoolchains = {tc_class.NAME: getattr(tc_class, 'SUBTOOLCHAIN', None) for tc_class in all_tc_classes}
+for key, val in subtoolchains.items():
+    if val is None:
+        val = []
+    elif not isinstance(val, list):
+        val = [val]
+    # Only care about composites, rest if handled via deps anyway
+    subtoolchains[key] = [v for v in val if (is_composite[v] if isinstance(v, str) else is_composite[v[0]])]
+
+
+def find_easyconfigs(name, version):
+    matches = []
+    for robot_path in robot_paths:
+        matches += glob(f'{robot_path}/{name[0].lower()}/{name}/{name}-{version}.eb') \
+                + glob(f'{robot_path}/{name}/{name}-{version}.eb') \
+                + glob(f'{robot_path}/{name}-{version}.eb')
+    return matches
+
+
+def get_toolchain_hierarchy(parent_toolchain):
+    # Can't use the one from easybuild as it's to fragile and does a bunch of extra unwanted things to global state.
+    # I also rewrote the logic here to consider toolchains
+    bfs_queue = [parent_toolchain]
+    tcs = [parent_toolchain]
+    while bfs_queue:
+        current_tc = bfs_queue.pop()
+        current_tc_name, current_tc_version = current_tc['name'], current_tc['version']
+
+        matches = find_easyconfigs(current_tc_name, current_tc_version)
+        if not matches:
+            continue
+        ec = EasyConfigParser(matches[0])
+        ecdict = ec.get_config_dict(validate=False)
+        if 'dependencies' in ecdict:
+            for dep in ecdict['dependencies']:
+                if len(dep) == 2:
+                    if dep[0] in subtoolchains:  # is a toolchain
+                        logging.warning(f"Found dep {dep} as part of toolchain")
+                        tc = {'name': dep[0], 'version': dep[1]}
+                        tcs.append(tc)
+                        bfs_queue.insert(0, tc)
+
+        for subtoolchain_name in subtoolchains[current_tc_name]:
+            logging.warning(f"Adding composite {subtoolchain_name} is composite")
+            tcs.append({'name': subtoolchain_name, 'version': current_tc_version})
+    return tcs
 
 
 def get_close_matches_icase(word, possibilities, *args, **kwargs):
@@ -56,18 +102,6 @@ query_dep_spec = PY_LANGUAGE.query("""
                         .((_) @dep.toolchain
                          .(_)* @dep.extra)?)?)? ) @dep.spec))
 """) # get named keys for dep.spec matches, we always want them in order
-
-
-def get_toolchains(ecdict):
-    # Returns all compatible toolchains
-    if 'toolchain' in ecdict:
-        return [ecdict['toolchain']] + \
-                [{'name': 'gfbf', 'version': '2023a'},
-                 {'name': 'gompi', 'version': '2023a'},
-                 {'name': 'GCC', 'version': '12.3.0'},
-                 {'name': 'GCCcore', 'version': '12.3.0'}]  # TODO
-    else:
-        return None
 
 
 def find_deps(name, versionsuffix, tcs):
@@ -112,7 +146,7 @@ def extract(tree, names):
     return {}
 
 
-def check_variables(ls, uri, tree, eb_kw):
+def check_variables(tree, eb_kw):
     all_known_ids = set(eb_kw) | set(default_parameters) | all_constants
     diagnostics = []
     for node, _ in query_global_kws.captures(tree.root_node):
@@ -122,10 +156,10 @@ def check_variables(ls, uri, tree, eb_kw):
             message = "Did you mean: " + ",".join(matches) if matches else "Unknown variable"
             diagnostics.append(make_diagnostic(node, message))
 
-    ls.publish_diagnostics(uri, diagnostics)
+    return diagnostics
 
 
-def check_dependencies(ls, uri, tree, ecdict, default_tcs):
+def check_dependencies(tree, ecdict, default_tcs):
     diagnostics = []
     for _, m in query_dep_spec.matches(tree.root_node):
         # Check at least that the tuple size makes sense
@@ -170,10 +204,10 @@ def check_dependencies(ls, uri, tree, ecdict, default_tcs):
                 message = "Did you mean " + ",".join(matches) if matches else "Name not recognized"
                 diagnostics.append(make_diagnostic(name_node, message))
 
-    ls.publish_diagnostics(uri, diagnostics)
+    return diagnostics
 
 
-def check_filename(ls, uri, tree, ecdict):
+def check_filename(uri, tree, ecdict):
     diagnostics = []
     # Check filename matching name, version, toolchain, versionsuffix
     filename = uri.split('/')[-1]
@@ -210,7 +244,7 @@ def check_filename(ls, uri, tree, ecdict):
             else:
                 logging.warning("Couldn't locate versionsuffix location in source")
 
-    ls.publish_diagnostics(uri, diagnostics)
+    return diagnostics
 
 
 server = LanguageServer("easyergo-server", "dev")
@@ -238,9 +272,15 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     except:
         eb_kw = []
 
-    default_tcs = get_toolchains(ecdict)
+    if 'toolchain' in ecdict:
+        default_tcs = get_toolchain_hierarchy(ecdict['toolchain'])
+    else:
+        default_tcs = []
 
-    check_variables(ls, text_doc.uri, tree, eb_kw)
-    check_dependencies(ls, text_doc.uri, tree, ecdict, default_tcs)
-    check_filename(ls, text_doc.uri, tree, ecdict)
+    logging.warning(f"Assuming toolchains: {default_tcs}")
+    diagnostics = []
+    diagnostics += check_variables(tree, eb_kw)
+    diagnostics += check_dependencies(tree, ecdict, default_tcs)
+    diagnostics += check_filename(text_doc.uri, tree, ecdict)
 
+    ls.publish_diagnostics(text_doc.uri, diagnostics)
