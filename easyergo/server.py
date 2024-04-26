@@ -10,31 +10,34 @@ import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
-from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class, get_toolchain_hierarchy
+from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
+from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
+from easybuild.tools.options import EasyBuildOptions
 from easybuild.tools.toolchain.utilities import search_toolchain
-import easybuild.framework.easyconfig
+from easybuild.framework.easyconfig import constants as eb_constants
 
 builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(builtins, attr)))
-
-all_constants = easybuild.framework.easyconfig.constants.__all__ + \
-                [x[0] for x in easybuild.framework.easyconfig.templates.TEMPLATE_CONSTANTS]
 
 PY_LANGUAGE = Language(tspython.language(), "python")
 parser = Parser()
 parser.set_language(PY_LANGUAGE)
 
+# Fixed initializations of easybuild
+eb_go = EasyBuildOptions(go_args=[])
+robot_paths = eb_go.options.robot_paths
+logging.debug("Using robot paths: %s", robot_paths)
+
+all_constants = set(eb_constants.__all__ + [x[0] for x in TEMPLATE_CONSTANTS])
+
 _, all_tc_classes = search_toolchain('')
 subtoolchains = {tc_class.NAME: getattr(tc_class, 'SUBTOOLCHAIN', None) for tc_class in all_tc_classes}
-
-robot_paths = ['/apps/easybuild-easyconfigs/easybuild/easyconfigs/']
 
 
 def get_close_matches_icase(word, possibilities, *args, **kwargs):
     """ Case-insensitive version of difflib.get_close_matches """
-    lword = word.lower()
     lpos = {p.lower(): p for p in possibilities}
-    lmatches = difflib.get_close_matches(lword, lpos.keys(), *args, **kwargs)
+    lmatches = difflib.get_close_matches(word.lower(), lpos.keys(), *args, **kwargs)
     return [lpos[m] for m in lmatches]
 
 
@@ -53,6 +56,18 @@ query_dep_spec = PY_LANGUAGE.query("""
                         .((_) @dep.toolchain
                          .(_)* @dep.extra)?)?)? ) @dep.spec))
 """) # get named keys for dep.spec matches, we always want them in order
+
+
+def get_toolchains(ecdict):
+    # Returns all compatible toolchains
+    if 'toolchain' in ecdict:
+        return [ecdict['toolchain']] + \
+                [{'name': 'gfbf', 'version': '2023a'},
+                 {'name': 'gompi', 'version': '2023a'},
+                 {'name': 'GCC', 'version': '12.3.0'},
+                 {'name': 'GCCcore', 'version': '12.3.0'}]  # TODO
+    else:
+        return None
 
 
 def find_deps(name, versionsuffix, tcs):
@@ -98,7 +113,7 @@ def extract(tree, names):
 
 
 def check_variables(ls, uri, tree, eb_kw):
-    all_known_ids = set(eb_kw) | set(default_parameters) | set(all_constants)
+    all_known_ids = set(eb_kw) | set(default_parameters) | all_constants
     diagnostics = []
     for node, _ in query_global_kws.captures(tree.root_node):
         kw = node.text.decode('utf8')
@@ -180,7 +195,6 @@ def check_filename(ls, uri, tree, ecdict):
         if 'name' in toolchain and 'version' in toolchain and \
                toolchain["name"] != 'system' and \
            not f'-{toolchain["name"]}-{toolchain["version"]}' in filename:
-            logging.warning(f'-{toolchain["name"]}-{toolchain["version"]}')
             node = find_assignment(tree, 'toolchain')
             if node:
                 diagnostics.append(make_diagnostic(node, f"Does not match filename {filename}"))
@@ -224,16 +238,7 @@ async def check_known_kws(ls,  params=types.DocumentDiagnosticParams):
     except:
         eb_kw = []
 
-    # Detect toolchain
-    if 'toolchain' in ecdict:
-        # TODO:
-        default_tcs = [{'name': 'foss', 'version': '2023a'},
-                       {'name': 'gfbf', 'version': '2023a'},
-                       {'name': 'gompi', 'version': '2023a'},
-                       {'name': 'GCC', 'version': '12.3.0'},
-                       {'name': 'GCCcore', 'version': '12.3.0'}]
-    else:
-        default_tcs = None, None
+    default_tcs = get_toolchains(ecdict)
 
     check_variables(ls, text_doc.uri, tree, eb_kw)
     check_dependencies(ls, text_doc.uri, tree, ecdict, default_tcs)
