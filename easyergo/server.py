@@ -136,7 +136,7 @@ def check_dependencies(ectree, default_tcs):
         name, version = value[:2]
         name_node, version_node = children[:2]
         versionsuffix = value[2] if len(value) > 2 else ""
-        tcs =  value[3] if len(value) > 3 else default_tcs
+        tcs = [value[3]] if len(value) > 3 else default_tcs
 
         matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
         if matches:
@@ -178,7 +178,7 @@ def check_filename(uri, ectree):
                toolchain["name"] != 'system' and \
            not f'-{toolchain["name"]}-{toolchain["version"]}' in filename:
             nodes = ectree.var_assign_map.get('toolchain', None)
-            if node:
+            if nodes:
                 diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
             else:
                 logging.warning("Couldn't locate toolchain location in source")
@@ -187,7 +187,7 @@ def check_filename(uri, ectree):
         # not filename.endswith(f'{ecdict["versionsuffix"]}.eb'):
         if False:
             nodes = ectree.var_assign_map.get('versionsuffix', None)
-            if node:
+            if nodes:
                 diagnostics.append(make_diagnostic(nodes[-1], f"Does not match filename {filename}"))
             else:
                 logging.warning("Couldn't locate versionsuffix location in source")

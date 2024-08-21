@@ -34,3 +34,7 @@ def main():
 
     else:
         server.start_io()
+
+
+if __name__ == "__main__":
+    main()
