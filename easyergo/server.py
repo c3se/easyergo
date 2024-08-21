@@ -10,12 +10,10 @@ from lsprotocol import types
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
-from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
 from easybuild.tools.options import EasyBuildOptions
 from easybuild.tools.toolchain.utilities import search_toolchain
-from easybuild.framework.easyconfig import constants as eb_constants
 
-from easyergo.tsparser import EasyConfigTree
+from easyergo.tsparser import EasyConfigTree, eb_constants
 
 builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(builtins, attr)))
 
@@ -24,8 +22,6 @@ builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(built
 eb_go = EasyBuildOptions(go_args=[])
 robot_paths = eb_go.options.robot_paths
 logging.debug("Using robot paths: %s", robot_paths)
-
-all_constants = set(eb_constants.__all__ + [x[0] for x in TEMPLATE_CONSTANTS])
 
 _, all_tc_classes = search_toolchain('')
 is_composite = {tc_class.NAME: len(tc_class.__bases__) > 1 for tc_class in all_tc_classes}
@@ -118,11 +114,11 @@ def make_diagnostic(node, message):
 
 
 def check_variables(ectree, eb_kw):
-    all_known_ids = set(eb_kw) | set(default_parameters) | all_constants
+    all_known_ids = set(eb_kw) | set(default_parameters) | eb_constants.keys()
     diagnostics = []
     for node in ectree.nonlocal_var_nodes:
         kw = node.text.decode('utf8')
-        if kw not in default_parameters and kw not in eb_kw and kw not in all_constants:
+        if kw not in all_known_ids:
             matches = get_close_matches_icase(kw, all_known_ids)
             message = "Did you mean: " + ",".join(matches) if matches else "Unknown variable"
             diagnostics.append(make_diagnostic(node, message))

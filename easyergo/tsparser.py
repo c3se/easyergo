@@ -1,12 +1,15 @@
 import re
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
-
+from easybuild.framework.easyconfig import constants as eb_constants
+from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
 
 parser = Parser()
 PY_LANGUAGE = Language(tspython.language(), "python")
 parser.set_language(PY_LANGUAGE)
 
+eb_constants = {k:eb_constants.__dict__[k] for k in eb_constants.__all__}
+eb_constants.update({k:v for k,v in TEMPLATE_CONSTANTS})
 
 def ec_property(fn, prop_name=None):
     prop_name = "_" + fn.__name__ if prop_name is None else prop_name
@@ -84,14 +87,18 @@ class EasyConfigTree():
 
     def resolve_node(self, node, hints=None):
         if hints is None: hints=self.hints
+
         q = PY_LANGUAGE.query("""((identifier) @id)""")
         child_var_nodes = set(node for node, _ in q.captures(node))
         child_names = set(node.text.decode() for node in child_var_nodes)
         child_names = child_names.intersection(self.var_assign_map.keys())
 
+        real_hints = eb_constants
+        real_hints.update(hints)
+
         if len(child_names-hints.keys())==0:
             try:
-                val = eval(node.text, hints)
+                val = eval(node.text, real_hints)
                 if not(isinstance(val, str) and re.match(r'.*%\(.*\)s', val)):
                     return val
             except:
