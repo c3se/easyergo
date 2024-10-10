@@ -13,10 +13,10 @@ authors = [
     { name = "Yunqi Shao", email = "yunqi.shao@chalmers.se" },
 ]
 dependencies = [
-   "easybuild",
-   "pygls",
-   "tree_sitter",
-   "tree_sitter_python",
+   "easybuild~=4.9",
+   "pygls~=1.3",
+   "tree_sitter~=0.23",
+   "tree_sitter_python~=0.23",
 ]
 classifiers = [
    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",

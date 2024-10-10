@@ -4,9 +4,9 @@ from tree_sitter import Language, Parser
 from easybuild.framework.easyconfig import constants as eb_constants
 from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
 
-parser = Parser()
-PY_LANGUAGE = Language(tspython.language(), "python")
-parser.set_language(PY_LANGUAGE)
+
+PY_LANGUAGE = Language(tspython.language())
+parser = Parser(PY_LANGUAGE)
 
 eb_constants = {k:eb_constants.__dict__[k] for k in eb_constants.__all__}
 eb_constants.update({k:v for k,v,_ in TEMPLATE_CONSTANTS})
