@@ -1,1 +1,3 @@
 __pycache__/
+/exts/vscode/node_modules/
+/exts/vscode/out/

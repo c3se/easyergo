@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    "*.eb": "python"
+  },
+  "easyergo.cwd": "${workspaceFolder}/examples",
+  "easyergo.host": "localhost",
+  "easyergo.port": 5678,
+  "easyergo.mode": "debug",
+  "editor.parameterHints.enabled": false
+}

@@ -1,0 +1,9 @@
+{
+  "image": "mcr.microsoft.com/vscode/devcontainers/python:3",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "latest"
+    }
+  },
+  "postCreateCommand": "pip install -e . && cd exts/vscode && npm install && npm run compile"
+}

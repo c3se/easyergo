@@ -1,0 +1,105 @@
+{
+  "name": "easyergo",
+  "description": "VSCode Extension for EasyErgo",
+  "author": "C3SE",
+  "repository": "https://github.com/c3se/easyergo",
+  "license": "GPL-2.0-only",
+  "version": "0.1.0",
+  "publisher": "C3SE",
+  "engines": {
+    "node": ">=16.17.1",
+    "vscode": "^1.78.0"
+  },
+  "extensionDependencies": [
+    "ms-python.python"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "easyergo.restart",
+        "title": "Restart EasyErgo Server",
+        "category": "easyergo"
+      },
+      {
+        "command": "easyergo.executeCommand",
+        "title": "Execute Command",
+        "category": "easyergo"
+      }
+    ],
+    "configuration": [
+      {
+        "type": "object",
+        "title": "EasyErgo Server Configuration",
+        "properties": {
+          "easyergo.cwd": {
+            "scope": "resource",
+            "type": "string",
+            "description": "The working directory from which to launch the server.",
+            "markdownDescription": "The working directory from which to launch the server."
+          },
+          "easyergo.mode": {
+            "scope": "resource",
+            "default": "stdio",
+            "type": "string",
+            "description": "How EasyErgo should be started stdio/ws/debug."
+          },
+          "easyergo.host": {
+            "scope": "resource",
+            "default": "localhost",
+            "type": "string",
+            "description": "The host on which the server process to debug is running."
+          },
+          "easyergo.port": {
+            "scope": "resource",
+            "default": 5678,
+            "type": "integer",
+            "description": "The port number on which the server process to debug is listening."
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "Client Configuration",
+        "properties": {
+          "easyergo.documentSelector": {
+            "scope": "window",
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "default": [
+              {
+                "scheme": "file",
+                "language": "python"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p .",
+    "watch": "tsc -p . -w"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "@types/semver": "^7.5.0",
+    "@types/vscode": "^1.78.0",
+    "@typescript-eslint/eslint-plugin": "^5.3.0",
+    "@typescript-eslint/parser": "^5.3.0",
+    "eslint": "^8.2.0",
+    "typescript": "^5.1.0"
+  },
+  "dependencies": {
+    "@vscode/python-extension": "^1.0.4",
+    "semver": "^7.5.4",
+    "vscode-languageclient": "^8.1.0"
+  }
+}
