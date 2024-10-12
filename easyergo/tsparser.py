@@ -4,7 +4,6 @@ from tree_sitter import Language, Parser
 from easybuild.framework.easyconfig import constants as eb_constants
 from easybuild.framework.easyconfig.templates import TEMPLATE_CONSTANTS
 
-
 PY_LANGUAGE = Language(tspython.language())
 parser = Parser(PY_LANGUAGE)
 
@@ -42,13 +41,13 @@ class EasyConfigTree():
         (_ .(_) @first (identifier)? @other) @parent
         )""")
         for _, m in q.matches(self.tree.root_node):
-            if m['first'].type == 'identifier':
-                self._var_nodes.add(m['first'])
+            if m['first'][0].type == 'identifier':
+                self._var_nodes.add(m['first'][0])
             if 'other' in m:
-                if m['parent'].type!='attribute':
-                    self._var_nodes.add(m['other'])
+                if m['parent'][0].type!='attribute':
+                    self._var_nodes.add(m['other'][0])
                 else: # save a short list of  attributes for resolver
-                    self._attr_names.add(m['other'].text.decode())
+                    self._attr_names.add(m['other'][0].text.decode())
 
     @ec_property
     def var_assign_map(self):
@@ -57,9 +56,9 @@ class EasyConfigTree():
         (assignment left: (identifier) @id ) @expr
         )""")
         for _, m in q.matches(self.tree.root_node):
-            var_name = m['id'].text.decode()
+            var_name = m['id'][0].text.decode()
             if var_name in self._var_assign_map:
-                self._var_assign_map[var_name].append(m['expr'])
+                self._var_assign_map[var_name].append(m['expr'][0])
 
     @ec_property
     def dep_nodes(self):
@@ -72,8 +71,8 @@ class EasyConfigTree():
             )""")
             for _, m in q.matches(self.tree.root_node):
                 if 'dep' in m:
-                    children = m['dep'].children[1::2]
-                    self._dep_nodes.append((m['dep'], children))
+                    children = m['dep'][0].children[1::2]
+                    self._dep_nodes.append((m['dep'][0], children))
 
     @ec_property
     def nonlocal_var_nodes(self):
@@ -89,7 +88,7 @@ class EasyConfigTree():
         if hints is None: hints=self.hints
 
         q = PY_LANGUAGE.query("""((identifier) @id)""")
-        child_var_nodes = set(node for node, _ in q.captures(node))
+        child_var_nodes = set(node[0] for node in q.captures(node).values())
         child_names = set(node.text.decode() for node in child_var_nodes)
         child_names = child_names.intersection(self.var_assign_map.keys())
 
