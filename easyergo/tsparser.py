@@ -10,7 +10,10 @@ parser = Parser(PY_LANGUAGE)
 eb_constants = {k:eb_constants.__dict__[k] for k in eb_constants.__all__}
 eb_constants.update({k:v for k,v,_ in TEMPLATE_CONSTANTS})
 
+
 def ec_property(fn, prop_name=None):
+    """`@property`-like decorator for EC parse."""
+
     prop_name = "_" + fn.__name__ if prop_name is None else prop_name
     @property
     def ec_property_fn(self):
@@ -22,6 +25,15 @@ def ec_property(fn, prop_name=None):
 
 
 class EasyConfigTree():
+    """Representation of EasyConfig as syntax tree
+
+    Several assumptions are made here:
+    1. EasyConfig is shallow, no nested function definitions;
+    2. assignments are simple, no handling of condition statments;
+    3. each text file is parsed only once, so properties never change.
+
+    """
+
     def __init__(self, text, hints={}):
         self.tree = parser.parse(text)
         self.hints = hints
@@ -35,6 +47,12 @@ class EasyConfigTree():
 
     @ec_property
     def var_nodes(self):
+        """Find variable nodes
+
+        This captures identifiers and method calls (e.g. `var.upper()`) to be
+        matched against known EB variables.
+
+        """
         self._var_nodes = set()
         self._attr_names = set()
         q = PY_LANGUAGE.query("""(
@@ -51,6 +69,8 @@ class EasyConfigTree():
 
     @ec_property
     def var_assign_map(self):
+        """Find variable assignments. """
+
         self._var_assign_map = {k.text.decode(): [] for k in self.var_nodes}
         q = PY_LANGUAGE.query("""(
         (assignment left: (identifier) @id ) @expr
@@ -62,6 +82,7 @@ class EasyConfigTree():
 
     @ec_property
     def dep_nodes(self):
+        """All nodes that are dependency specifications. """
         if self._dep_nodes is None:
             self._dep_nodes = []
             q = PY_LANGUAGE.query("""(
@@ -76,6 +97,7 @@ class EasyConfigTree():
 
     @ec_property
     def nonlocal_var_nodes(self):
+        """Variable nodes that are not named as a local variable. """
         self._nonlocal_var_nodes = set()
         for var_node in self.var_nodes:
             name = var_node.text
@@ -85,6 +107,12 @@ class EasyConfigTree():
                 self._nonlocal_var_nodes.add(var_node)
 
     def resolve_node(self, node, hints=None):
+        """Attempt to derive the value of an expression node. We limit us to
+        expressions where all child variables are available either as a
+        eb_constant, or a hint.
+
+        """
+
         if hints is None: hints=self.hints
 
         q = PY_LANGUAGE.query("""((identifier) @id)""")
@@ -98,6 +126,7 @@ class EasyConfigTree():
         if len(child_names-real_hints.keys())==0:
             try:
                 val = eval(node.text, real_hints)
+                # Give up if the string seems to contain a template
                 if not(isinstance(val, str) and re.match(r'.*%\(.*\)s', val)):
                     return val
             except:
@@ -107,6 +136,12 @@ class EasyConfigTree():
 
     @ec_property
     def ecdict(self):
+        """Construct the ecdict representation of the EasyConfig, this contains
+        variables that are assigned ONLY ONCE, and the assignment is resolvable
+        with resolve_node().
+
+        """
+
         self._ecdict = self.hints.copy()
         for var_node in self.var_nodes:
             var_name = var_node.text.decode()
@@ -119,6 +154,8 @@ class EasyConfigTree():
 
     @ec_property
     def dep_vals(self):
+        """All (build) dependencies in the EasyConfig. """
+
         self._dep_vals = []
         for _, children in self.dep_nodes:
             dep = tuple(self.resolve_node(child, self.ecdict) for child in children)
