@@ -10,7 +10,7 @@ from lsprotocol import types
 from easybuild.framework.easyconfig.default import DEFAULT_CONFIG as default_parameters
 from easybuild.framework.easyconfig.easyconfig import get_easyblock_class
 from easybuild.framework.easyconfig.parser import EasyConfigParser, fetch_parameters_from_easyconfig
-from easybuild.tools.options import EasyBuildOptions
+from easybuild.tools.options import EasyBuildOptions, CONFIG_ENV_VAR_PREFIX
 from easybuild.tools.toolchain.utilities import search_toolchain
 
 from easyergo.tsparser import EasyConfigTree, eb_constants
@@ -19,9 +19,9 @@ builtin_functions = set(attr for attr in dir(builtins) if callable(getattr(built
 
 
 # Fixed initializations of easybuild
-eb_go = EasyBuildOptions(go_args=[])
+eb_go = EasyBuildOptions(go_args=[], envvar_prefix=CONFIG_ENV_VAR_PREFIX)
 robot_paths = eb_go.options.robot_paths
-logging.debug("Using robot paths: %s", robot_paths)
+logging.debug("Using robot paths: %s", ':'.join(robot_paths))
 
 _, all_tc_classes = search_toolchain('')
 is_composite = {tc_class.NAME: len(tc_class.__bases__) > 1 for tc_class in all_tc_classes}
@@ -136,7 +136,13 @@ def check_dependencies(ectree, default_tcs):
         name, version = value[:2]
         name_node, version_node = children[:2]
         versionsuffix = value[2] if len(value) > 2 else ""
-        tcs = [value[3]] if len(value) > 3 else default_tcs
+        if len(value) > 3:
+            if isinstance(value[3], dict):
+                tcs = [value[3]]
+            else:
+                tcs = [{'name': value[3][0], 'version': value[3][1]}]
+        else:
+            tcs = default_tcs
 
         matches, name_exists, name_suggestions = find_deps(name, versionsuffix, tcs)
         if matches:
