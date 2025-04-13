@@ -8,7 +8,7 @@ PY_LANGUAGE = Language(tspython.language())
 parser = Parser(PY_LANGUAGE)
 
 eb_constants = {k:eb_constants.__dict__[k] for k in eb_constants.__all__}
-eb_constants.update({k:v for k,v,_ in TEMPLATE_CONSTANTS})
+eb_constants.update({k:v[0] for k,v in TEMPLATE_CONSTANTS.items()})
 
 
 def ec_property(fn, prop_name=None):

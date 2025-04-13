@@ -13,7 +13,7 @@ authors = [
     { name = "Yunqi Shao", email = "yunqi.shao@chalmers.se" },
 ]
 dependencies = [
-   "easybuild~=4.9",
+   "easybuild~=5.0",
    "pygls~=1.3",
    "tree_sitter~=0.23",
    "tree_sitter_python~=0.23",
