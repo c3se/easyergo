@@ -8,10 +8,10 @@ is to make contributing to easyconfig *even easier*, by providing:
   - easybuild keywords;
   - easybuild parameters;
   - dependency and version (based on current toolchain/robot-path);
-- checker and/or formater for
-  - easybuild style rules;
-  - missing checksums;
-  - (opt-in) sane parameter orders.
+- planned features:
+  - easybuild style checker;
+  - checksums injection;
+  - maybe more...
 
 ## Installatoin & usage
 
@@ -27,7 +27,7 @@ Run a debug server as:
 easyergo --debug
 ```
 
-### Emacs with (built-in since Emacs 29) eglot example
+### Emacs with eglot (built-in since Emacs 29) example
 
 ```elisp
 (define-derived-mode eb-mode python-mode "EB")
