@@ -13,13 +13,15 @@ is to make contributing to easyconfig *even easier*, by providing:
   - checksums injection;
   - maybe more...
 
-## Installatoin & usage
+## Installation & usage
 
 You will soon be able to install EasyErgo from PyPI, for now:
 
 ```shell
 pip install git+https://github.com/c3se/easyergo.git
 ```
+
+or via `eb -r EasyErgo-1.0.0.eb`
 
 Run a debug server as:
 
